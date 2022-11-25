@@ -10,6 +10,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -29,6 +31,7 @@ namespace Pal.Client.Windows
         private bool _fillSilverCoffers;
 
         private string? _connectionText;
+        private bool _switchToCommunityTab;
 
         public ConfigWindow() : base("Palace Pal###PalPalaceConfig")
         {
@@ -109,8 +112,10 @@ namespace Pal.Client.Windows
                     ImGui.EndTabItem();
                 }
 
-                if (ImGui.BeginTabItem("Community"))
+                if (BeginTabItemEx("Community", _switchToCommunityTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
                 {
+                    _switchToCommunityTab = false;
+
                     ImGui.TextWrapped("Ideally, we want to discover every potential trap and chest location in the game, but doing this alone is very tedious. Floor 51-60 has over 100 trap locations and over 50 coffer locations, the last of which took over 50 runs to find - and we don't know if that map is complete. Higher floors naturally see fewer runs, making solo attempts to map the place much harder.");
                     ImGui.TextWrapped("You can decide whether you want to share traps and chests you find with the community, which likewise also will let you see chests and coffers found by other players. This can be changed at any time. No data regarding your FFXIV character or account is ever sent to our server.");
 
@@ -122,25 +127,7 @@ namespace Pal.Client.Windows
 
                     ImGui.BeginDisabled(Service.Configuration.Mode != Configuration.EMode.Online);
                     if (ImGui.Button("Test Connection"))
-                    {
-                        Task.Run(async () =>
-                        {
-                            _connectionText = "Testing...";
-
-                            CancellationTokenSource cts = new CancellationTokenSource();
-                            cts.CancelAfter(TimeSpan.FromSeconds(60));
-                            
-                            try
-                            {
-                                _connectionText = await Service.RemoteApi.VerifyConnection(cts.Token);
-                            }
-                            catch (Exception e)
-                            {
-                                PluginLog.Error(e, "Could not establish remote connection");
-                                _connectionText = e.ToString();
-                            }
-                        });
-                    }
+                        TestConnection();
 
                     if (_connectionText != null)
                         ImGui.Text(_connectionText);
@@ -261,6 +248,43 @@ namespace Pal.Client.Windows
 
                 Service.Chat.PrintError("Could not draw markers, is Splatoon installed and enabled?");
             }
+        }
+
+        /// <summary>
+        /// None of the default BeginTabItem methods allow using flags without making the tab have a close button for some reason.
+        /// </summary>
+        private unsafe static bool BeginTabItemEx(string label, ImGuiTabItemFlags flags)
+        {
+            int labelLength = Encoding.UTF8.GetByteCount(label);
+            byte* labelPtr = stackalloc byte[labelLength + 1];
+            byte[] labelBytes = Encoding.UTF8.GetBytes(label);
+
+            Marshal.Copy(labelBytes, 0, (IntPtr)labelPtr, labelLength);
+            labelPtr[labelLength] = 0;
+
+            return ImGuiNative.igBeginTabItem(labelPtr, null, flags) != 0;
+        }
+
+        internal void TestConnection()
+        {
+            Task.Run(async () =>
+            {
+                _connectionText = "Testing...";
+                _switchToCommunityTab = true;
+
+                CancellationTokenSource cts = new CancellationTokenSource();
+                cts.CancelAfter(TimeSpan.FromSeconds(60));
+
+                try
+                {
+                    _connectionText = await Service.RemoteApi.VerifyConnection(cts.Token);
+                }
+                catch (Exception e)
+                {
+                    PluginLog.Error(e, "Could not establish remote connection");
+                    _connectionText = e.ToString();
+                }
+            });
         }
     }
 }

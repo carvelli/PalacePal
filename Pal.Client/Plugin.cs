@@ -120,6 +120,15 @@ namespace Pal.Client
                         Task.Run(async () => await FetchFloorStatistics());
                         break;
 
+                    case "test-connection":
+                        var configWindow = Service.WindowSystem.GetWindow<ConfigWindow>();
+                        if (configWindow == null)
+                            return;
+
+                        configWindow.IsOpen = true;
+                        configWindow.TestConnection();
+                        break;
+
 #if DEBUG
                     case "update-saves":
                         LocalState.UpdateAll();
