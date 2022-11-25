@@ -2,11 +2,13 @@
 using Dalamud.Logging;
 using Grpc.Core;
 using Grpc.Net.Client;
+using Grpc.Net.Client.Web;
 using Microsoft.Extensions.Logging;
 using Palace;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Net.Security;
 using System.Numerics;
@@ -19,9 +21,11 @@ namespace Pal.Client.Net
     internal class RemoteApi : IDisposable
     {
 #if DEBUG
-        private const string remoteUrl = "http://localhost:5145";
+        private const string _remoteUrlGrpc = "http://localhost:5145";
+        private const string _remoteUrlGrpcWeb = remoteUrlGrpc;
 #else
-        private const string remoteUrl = "https://pal.μ.tv";
+        private const string _remoteUrlGrpc = "https://pal.μ.tv";
+        private const string _remoteUrlGrpcWeb = "https://pal.μ.tv:8443";
 #endif
         private readonly string UserAgent = $"{typeof(RemoteApi).Assembly.GetName().Name?.Replace(" ", "")}/{typeof(RemoteApi).Assembly.GetName().Version?.ToString(2)}";
 
@@ -33,15 +37,18 @@ namespace Pal.Client.Net
 
         public Guid? AccountId
         {
-            get => Service.Configuration.AccountIds.TryGetValue(remoteUrl, out Guid accountId) ? accountId : null;
+            get => Service.Configuration.AccountIds.TryGetValue(ConfigurationRemoteUrl, out Guid accountId) ? accountId : null;
             set
             {
                 if (value != null)
-                    Service.Configuration.AccountIds[remoteUrl] = value.Value;
+                    Service.Configuration.AccountIds[ConfigurationRemoteUrl] = value.Value;
                 else
-                    Service.Configuration.AccountIds.Remove(remoteUrl);
+                    Service.Configuration.AccountIds.Remove(ConfigurationRemoteUrl);
             }
         }
+
+        private string ConfigurationRemoteUrl => _remoteUrlGrpc;
+        private string RemoteUrl => _remoteUrlGrpcWeb;
 
         private string PartialAccountId =>
             AccountId?.ToString()?.PadRight(14).Substring(0, 13) ?? "[no account id]";
@@ -59,24 +66,30 @@ namespace Pal.Client.Net
                 Dispose();
 
                 PluginLog.Information("TryConnect: Creating new gRPC channel");
-                _channel = GrpcChannel.ForAddress(remoteUrl, new GrpcChannelOptions
+                HttpMessageHandler httpHandler = new SocketsHttpHandler
                 {
-                    HttpHandler = new SocketsHttpHandler
-                    {
-                        ConnectTimeout = TimeSpan.FromSeconds(5),
-                        SslOptions = GetSslClientAuthenticationOptions(),
-                    },
+                    ConnectTimeout = TimeSpan.FromSeconds(25),
+                    SslOptions = GetSslClientAuthenticationOptions(),
+                };
+                httpHandler = new GrpcWebHandler
+                {
+                    InnerHandler = httpHandler,
+                    HttpVersion = HttpVersion.Version11,
+                };
+                _channel = GrpcChannel.ForAddress(RemoteUrl, new GrpcChannelOptions
+                {
+                    HttpHandler = httpHandler,
                     LoggerFactory = loggerFactory,
                 });
 
-                PluginLog.Information($"TryConnect: Connecting to upstream service at {remoteUrl}");
+                PluginLog.Information($"TryConnect: Connecting to upstream service at {RemoteUrl}");
                 await _channel.ConnectAsync(cancellationToken);
             }
 
             var accountClient = new AccountService.AccountServiceClient(_channel);
             if (AccountId == null)
             {
-                PluginLog.Information($"TryConnect: No account information saved for {remoteUrl}, creating new account");
+                PluginLog.Information($"TryConnect: No account information saved for {RemoteUrl}, creating new account");
                 var createAccountReply = await accountClient.CreateAccountAsync(new CreateAccountRequest(), headers: UnauthorizedHeaders(), deadline: DateTime.UtcNow.AddSeconds(10), cancellationToken: cancellationToken);
                 if (createAccountReply.Success)
                 {

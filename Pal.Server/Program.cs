@@ -39,8 +39,9 @@ namespace Pal.Server
             var app = builder.Build();
             app.UseAuthentication();
             app.UseAuthorization();
-            app.MapGrpcService<AccountService>();
-            app.MapGrpcService<PalaceService>();
+            app.UseGrpcWeb();
+            app.MapGrpcService<AccountService>().EnableGrpcWeb();
+            app.MapGrpcService<PalaceService>().EnableGrpcWeb();
 
             using (var scope = app.Services.CreateScope())
             {
